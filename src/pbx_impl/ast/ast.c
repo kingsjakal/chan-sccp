@@ -931,11 +931,16 @@ void sccp_astwrap_connectedline(sccp_channel_t * channel, const void *data, size
 	}
 	//sccp_channel_display_callInfo(channel);
 	if (changes) {
-		sccp_channel_send_callinfo2(channel);
-
 		/* We have a preliminary connected line, indicate RINGOUT_ALERTING */
-		if (SKINNY_CALLTYPE_OUTBOUND == channel->calltype && SCCP_CHANNELSTATE_RINGOUT == channel->state) {
-			sccp_indicate(NULL, channel, SCCP_CHANNELSTATE_RINGOUT_ALERTING);
+		sccp_channel_send_callinfo2(channel);
+		if(SKINNY_CALLTYPE_OUTBOUND == channel->calltype) {
+			AUTO_RELEASE(sccp_linedevice_t, ld, channel->getLineDevice(channel));
+			if(ld && SCCP_CHANNELSTATE_RINGOUT == channel->state) {
+				sccp_indicate(ld->device, channel, SCCP_CHANNELSTATE_RINGOUT_ALERTING);
+			} else if(ld && SCCP_CHANNELSTATE_IsConnected(channel->state)) {
+				sccp_device_sendcallstate(ld->device, ld->lineInstance, channel->callid, SKINNY_CALLSTATE_PROCEED, SKINNY_CALLPRIORITY_LOW, SKINNY_CALLINFO_VISIBILITY_HIDDEN);
+				sccp_device_sendcallstate(ld->device, ld->lineInstance, channel->callid, SKINNY_CALLSTATE_CONNECTED, SKINNY_CALLPRIORITY_NORMAL, SKINNY_CALLINFO_VISIBILITY_DEFAULT);
+			}
 		}
 #if CS_SCCP_VIDEO
 		const char *VideoStr = pbx_builtin_getvar_helper(channel->owner, "SCCP_VIDEO_MODE");
