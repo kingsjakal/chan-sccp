@@ -165,6 +165,9 @@ struct sccp_global_vars {
 
 	boolean_t reload_in_progress;										/*!< Reload in Progress */
 	boolean_t pendingUpdate;
+#ifdef CS_EXPERIMENTAL
+	PBX_VARIABLE_TYPE * test_var_root;
+#endif
 };														/*!< SCCP Global Varable Structure */
 
 /*!

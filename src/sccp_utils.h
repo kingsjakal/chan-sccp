@@ -108,6 +108,8 @@ SCCP_API int SCCP_CALL sccp_random(void);
 SCCP_API const char * SCCP_CALL sccp_retrieve_str_variable_byKey(PBX_VARIABLE_TYPE *params, const char *key);
 SCCP_API int SCCP_CALL sccp_retrieve_int_variable_byKey(PBX_VARIABLE_TYPE *params, const char *key);
 SCCP_API boolean_t SCCP_CALL sccp_append_variable(PBX_VARIABLE_TYPE *params, const char *key, const char *value);
+SCCP_API boolean_t SCCP_CALL sccp_remove_variable(PBX_VARIABLE_TYPE * params, const char * key);
+SCCP_API boolean_t SCCP_CALL sccp_add_replace_variable(PBX_VARIABLE_TYPE * params, const char * key, const char * value);
 SCCP_INLINE boolean_t SCCP_CALL sccp_always_false(void);
 SCCP_INLINE boolean_t SCCP_CALL sccp_always_true(void);
 SCCP_INLINE sccp_feature_type_t SCCP_CALL sccp_cfwd2feature(const sccp_cfwd_t type);

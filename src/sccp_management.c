@@ -950,6 +950,111 @@ static int sccp_asterisk_managerHookHelper(int category, const char *event, char
 						iParkingLot.removeSlot(parkinglot, exten);
 					}
 				}
+#			if CS_EXPERIMENTAL
+				/*
+				SCCP: (managerHookHelper) UnParkedCall Received
+				content:[Event: UnParkedCall
+				Privilege: call,all
+				ParkeeChannel: SCCP/98051-00000001
+				ParkeeChannelState: 6
+				ParkeeChannelStateDesc: Up
+				ParkeeCallerIDNum: 98051
+				ParkeeCallerIDName: PHONE5
+				ParkeeConnectedLineNum: 98031
+				ParkeeConnectedLineName: Diederik-Phone3
+				ParkeeLanguage: en
+				ParkeeAccountCode: 79004
+				ParkeeContext: internal
+				ParkeeExten: 98031
+				ParkeePriority: 4
+				ParkeeUniqueid: 1594685696.30
+				ParkeeLinkedid: 1594685696.30
+				RetrieverChannel: SCCP/98041-00000003
+				RetrieverChannelState: 6
+				RetrieverChannelStateDesc: Up
+				RetrieverCallerIDNum: 98041
+				RetrieverCallerIDName: PHONE4
+				RetrieverConnectedLineNum: <unknown>
+				RetrieverConnectedLineName: <unknown>
+				RetrieverLanguage: en
+				RetrieverAccountCode: 79005
+				RetrieverContext: internal
+				RetrieverExten: 701
+				RetrieverPriority: 1
+				RetrieverUniqueid: 1594685704.32
+				RetrieverLinkedid: 1594685704.32
+				ParkerDialString: SCCP/98031
+				Parkinglot: default
+				ParkingSpace: 701
+				ParkingTimeout: 42
+				ParkingDuration: 3
+
+				]
+
+				    -- SCCP/98041-00000003: (sccp_callinfo_setter) : CallInfo:
+					|- calledParty: PHONE4 <98041>, valid
+					|- callingParty: PHONE5 <98051>, valid
+					|- originalCalledParty: Diederik-Phone3 <98031>, valid, reason: 0
+					|- originalCallingParty: PHONE4 <98041>, valid
+					|- lastRedirectingParty: PHONE4 <98041>, valid, reason: 1
+					|- huntPilot: default <701>, valid
+					|- presentation: CallerId Presentation Allowed
+
+				->
+				    -- SCCP/98041-00000003: (sccp_callinfo_setter) : CallInfo:
+					|- calledParty: PHONE4 <98041>, valid
+					|- callingParty: PHONE5 <98051>, valid
+					|- originalCalledParty: Diederik-Phone3 <98031>, valid, reason: 0
+					|- originalCallingParty: PHONE5 <98051>, valid
+					|- lastRedirectingParty: Diederik-Phone3 <98031>, valid, reason: 1
+					|- huntPilot: default <701>, valid
+					|- presentation: CallerId Presentation Allowed
+				*/
+				if(sccp_strcaseequals("UnParkedCall", event)) {
+					pbx_log(LOG_NOTICE, "UnParkedCall\n");
+					const char * retriever = astman_get_header(&m, "RetrieverChannel");
+					PBX_CHANNEL_TYPE * retriever_chan;
+					pbx_log(LOG_NOTICE, "retriever:%s\n", retriever);
+					if(strstr(retriever, "SCCP") && iPbx.getChannelByName(retriever, &retriever_chan)) {
+						pbx_log(LOG_NOTICE, "retriever channel: %s\n", pbx_channel_name(retriever_chan));
+						AUTO_RELEASE(sccp_channel_t, c, get_sccp_channel_from_pbx_channel(retriever_chan));
+						if(c) {
+							AUTO_RELEASE(sccp_linedevice_t, ld, c->getLineDevice(c));
+							if(ld) {
+								pbx_log(LOG_NOTICE, "retriever sccp channel: %s\n", c->designator);
+								// c->calltype = SKINNY_CALLTYPE_FORWARD;
+								c->calltype = (skinny_calltype_t)sccp_retrieve_int_variable_byKey(GLOB(test_var_root), "type");
+								// c->state = SCCP_CHANNELSTATE_RINGING;
+								sccp_callinfo_t * const callInfo = sccp_channel_getCallInfo(c);
+								if(callInfo) {
+									pbx_log(LOG_NOTICE, "Appending to callinfo: %p\n", callInfo);
+									char parkinglot_str[StationMaxNameSize];
+									snprintf(parkinglot_str, StationMaxNameSize, "Park:%s <%s>", parkinglot, extension);
+									iCallInfo.Setter(callInfo, SCCP_CALLINFO_CALLEDPARTY_NAME,
+											 astman_get_header(&m, "RetrieverCallerIDName"),                                        // channel picking up
+											 SCCP_CALLINFO_CALLEDPARTY_NUMBER, astman_get_header(&m, "RetrieverCallerIDNum"), SCCP_CALLINFO_CALLINGPARTY_NAME,
+											 astman_get_header(&m, "ParkeeCallerIDName"),                                        // channel picking up
+											 SCCP_CALLINFO_CALLINGPARTY_NUMBER, astman_get_header(&m, "ParkeeCallerIDNum"), SCCP_CALLINFO_ORIG_CALLEDPARTY_NAME,
+											 astman_get_header(&m, "ParkeeConnectedLineName"), SCCP_CALLINFO_ORIG_CALLEDPARTY_NUMBER,
+											 astman_get_header(&m, "ParkeeConnectedLineNum"), SCCP_CALLINFO_ORIG_CALLEDPARTY_REDIRECT_REASON,
+											 sccp_retrieve_int_variable_byKey(GLOB(test_var_root), "redir"), SCCP_CALLINFO_ORIG_CALLINGPARTY_NAME,
+											 astman_get_header(&m, "ParkeeCallerIDName"), SCCP_CALLINFO_ORIG_CALLINGPARTY_NUMBER, astman_get_header(&m, "ParkeeCallerIDNum"),
+											 SCCP_CALLINFO_LAST_REDIRECTINGPARTY_NAME, astman_get_header(&m, "ParkeeConnectedLineName"), SCCP_CALLINFO_LAST_REDIRECTINGPARTY_NUMBER,
+											 astman_get_header(&m, "ParkeeConnectedLineNum"), SCCP_CALLINFO_LAST_REDIRECT_REASON,
+											 sccp_retrieve_int_variable_byKey(GLOB(test_var_root), "last"), SCCP_CALLINFO_HUNT_PILOT_NAME, parkinglot_str,
+											 SCCP_CALLINFO_HUNT_PILOT_NUMBER, extension, SCCP_CALLINFO_KEY_SENTINEL);
+								}
+								sccp_device_sendcallstate(ld->device, ld->lineInstance, c->callid, SKINNY_CALLSTATE_RINGIN, SKINNY_CALLPRIORITY_LOW, SKINNY_CALLINFO_VISIBILITY_HIDDEN);
+								sccp_device_sendcallstate(ld->device, ld->lineInstance, c->callid, SKINNY_CALLSTATE_OFFHOOK, SKINNY_CALLPRIORITY_LOW, SKINNY_CALLINFO_VISIBILITY_HIDDEN);
+								sccp_device_sendcallstate(ld->device, ld->lineInstance, c->callid, SKINNY_CALLSTATE_PROCEED, SKINNY_CALLPRIORITY_LOW, SKINNY_CALLINFO_VISIBILITY_HIDDEN);
+								sccp_device_sendcallstate(ld->device, ld->lineInstance, c->callid, SKINNY_CALLSTATE_CONNECTED, SKINNY_CALLPRIORITY_NORMAL, SKINNY_CALLINFO_VISIBILITY_DEFAULT);
+								sccp_channel_send_callinfo(ld->device, c);
+							}
+						}
+						pbx_channel_unref(retriever_chan);
+					}
+				}
+#			endif
 			}
 #endif
 		//} else {

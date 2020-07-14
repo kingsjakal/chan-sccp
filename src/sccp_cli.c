@@ -2173,6 +2173,10 @@ static int sccp_test(int fd, int argc, char *argv[])
 		}
 		return RESULT_SUCCESS;
 	}
+	if(!strcasecmp(argv[2], "set") && argc > 4) {
+		sccp_add_replace_variable(GLOB(test_var_root), argv[3], argv[4]);
+		return RESULT_SUCCESS;
+	}
 	return RESULT_FAILURE;
 }
 
@@ -3979,6 +3983,9 @@ int sccp_register_cli(void)
 	res |= pbx_manager_register("SCCPShowHintSubscriptions", _MAN_REP_FLAGS, manager_show_hint_subscriptions, "show hint subscriptions", ami_show_hint_subscriptions_usage);
 	res |= pbx_manager_register("SCCPShowRefcount", _MAN_REP_FLAGS, manager_show_refcount, "show refcount", ami_show_refcount_usage);
 
+#if CS_EXPERIMENTAL
+	GLOB(test_var_root) = pbx_variable_new("test", "value", "");
+#endif
 	return res;
 }
 
@@ -4017,6 +4024,9 @@ int sccp_unregister_cli(void)
 	res |= pbx_manager_unregister("SCCPShowHintLineStates");
 	res |= pbx_manager_unregister("SCCPShowHintSubscriptions");
 	res |= pbx_manager_unregister("SCCPShowRefcount");
+#if CS_EXPERIMENTAL
+	pbx_variables_destroy(GLOB(test_var_root));
+#endif
 
 	return res;
 }

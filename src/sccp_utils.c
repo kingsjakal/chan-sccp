@@ -1592,24 +1592,46 @@ int sccp_retrieve_int_variable_byKey(PBX_VARIABLE_TYPE *params, const char *key)
 
 boolean_t sccp_append_variable(PBX_VARIABLE_TYPE *params, const char *key, const char *value)
 {
+	pbx_assert(params && key);
 	boolean_t res = FALSE;
-	PBX_VARIABLE_TYPE * newvar = NULL;
-	if ((newvar = pbx_variable_new(key, value, ""))) {
-		if (params) {
-			while(params->next) {
-				params = params->next;
-			}
-			params->next = newvar;
-		} else {
-			params = newvar;
-		}
-		res = TRUE;
-	} else {
+	PBX_VARIABLE_TYPE * v = ast_variable_new(key, value, "");
+	if(!v) {
 		pbx_log(LOG_ERROR, "SCCP: (append_variable) Error while creating newvar structure\n");
+		return res;
 	}
+	ast_variable_list_append(&params, v);
 	return res;
 }
 
+boolean_t sccp_remove_variable(PBX_VARIABLE_TYPE * params, const char * key)
+{
+	pbx_assert(params && key);
+	PBX_VARIABLE_TYPE * v = params;
+	PBX_VARIABLE_TYPE * prev = NULL;
+	while(v) {
+		struct ast_variable * next = v->next;
+		if(strcasecmp(v->name, key) == 0) {
+			if(prev) {
+				prev->next = next;
+			} else {
+				params = next;
+			}
+			ast_free(v);
+			return TRUE;
+		} else {
+			prev = v;
+		}
+		v = next;
+	}
+	return FALSE;
+}
+
+boolean_t sccp_add_replace_variable(PBX_VARIABLE_TYPE * params, const char * key, const char * value)
+{
+	pbx_assert(params && key);
+	sccp_remove_variable(params, key);
+	return sccp_append_variable(params, key, value);
+}
 
 gcc_inline int sccp_utf8_columnwidth(int width, const char *const ms)
 {
