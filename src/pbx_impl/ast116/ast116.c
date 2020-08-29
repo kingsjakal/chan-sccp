@@ -59,6 +59,7 @@ __BEGIN_C_EXTERN__
 #include <asterisk/bridge_after.h>
 #include <asterisk/bridge_channel.h>
 #include <asterisk/format_cap.h>		// for AST_FORMAT_CAP_NAMES_LEN
+#include <asterisk/say.h>                                        // PARKING
 
 #define new avoid_cxx_new_keyword
 #include <asterisk/rtp_engine.h>
@@ -1463,6 +1464,74 @@ int sccp_astwrap_hangup(PBX_CHANNEL_TYPE * ast_channel)
 	return res;
 }
 
+static void parking_event_cb(void * data, struct stasis_subscription * sub, struct stasis_message * message)
+{
+	struct ast_parked_call_payload * parked_payload = stasis_message_data(message);
+	AUTO_RELEASE(sccp_channel_t, parker, sccp_channel_retain((sccp_channel_t *)data));
+	if(!parker) {
+		pbx_log(LOG_ERROR, "No Parker provided\n");
+		return;
+	}
+
+	RAII(struct ast_channel *, parker_chan, ast_channel_ref(parker->owner), ao2_cleanup);
+	if(!parker_chan) {
+		pbx_log(LOG_ERROR, "%s: No Park Owner set\n", parker->designator);
+		return;
+	}
+
+	if(stasis_subscription_final_message(sub, message)) {
+		// pbx_log(LOG_NOTICE, "%s: (parking_event_cb) Final Message", parker->designator);
+		return;
+	}
+
+	switch(parked_payload->event_type) {
+		case PARKED_CALL: {
+			pbx_log(LOG_NOTICE, "%s Parked call:%s to parkingspace:%d@%s\n", ast_channel_name(parker_chan), parked_payload->parkee->base->uniqueid, parked_payload->parkingspace, parked_payload->parkinglot);
+			char parkingspace[16];
+			snprintf(parkingspace, sizeof(parkingspace), "%d", parked_payload->parkingspace);
+			AUTO_RELEASE(sccp_device_t, d, sccp_channel_getDevice(parker));
+			if(d) {
+				char extstr[20] = "";
+				snprintf(extstr, sizeof(extstr), "%c%c %s", 128, SKINNY_LBL_CALL_PARK_AT, parkingspace);
+				sccp_dev_displayprinotify(d, extstr, SCCP_MESSAGE_PRIORITY_TIMEOUT, 20);
+			}
+			RAII(struct ast_bridge *, bridge, ast_channel_get_bridge(parker_chan), ao2_cleanup);
+			if(bridge) {
+				// pbx_log(LOG_NOTICE, "%s Playback Park Announcement\n", parker->designator);
+				ast_bridge_suspend(bridge, parker_chan);
+				ast_say_digit_str(parker_chan, parkingspace, "", ast_channel_language(parker_chan));
+				ast_bridge_unsuspend(bridge, parker_chan);
+			} else {
+				parker->setTone(parker, SKINNY_TONE_CONFIRMATIONTONE, SKINNY_TONEDIRECTION_USER);
+			}
+			sccp_astgenwrap_requestHangup(parker);
+		} break;
+		case PARKED_CALL_FAILED: {
+			pbx_log(LOG_NOTICE, "%s Parked failed\n", ast_channel_name(parker_chan));
+			AUTO_RELEASE(sccp_device_t, d, sccp_channel_getDevice(parker));
+			if(d) {
+				sccp_dev_displayprinotify(d, SKINNY_DISP_TEMP_FAIL, SCCP_MESSAGE_PRIORITY_TIMEOUT, GLOB(digittimeout));
+			}
+			parker->setTone(parker, SKINNY_TONE_REORDERTONE, SKINNY_TONEDIRECTION_USER);
+			sccp_astgenwrap_requestHangup(parker);
+		} break;
+		case PARKED_CALL_TIMEOUT:
+		case PARKED_CALL_GIVEUP:
+		case PARKED_CALL_UNPARKED:
+		default:
+			pbx_log(LOG_ERROR, "%s:Park event:%d not handled\n", parker->designator, parked_payload->event_type);
+			break;
+	}
+}
+
+static void * parking_subscriptionCleanup(void * data)
+{
+	sccp_channel_t * hostChannel = (sccp_channel_t *)data;
+	hostChannel->parking_sub = stasis_unsubscribe_and_join(hostChannel->parking_sub);
+	sccp_channel_release(&hostChannel);
+	return NULL;
+}
+
 /*!
  * \brief Parking Thread Arguments Structure
  */
@@ -1480,31 +1549,57 @@ int sccp_astwrap_hangup(PBX_CHANNEL_TYPE * ast_channel)
 static sccp_parkresult_t sccp_astwrap_park(constChannelPtr hostChannel)
 {
 	sccp_parkresult_t res = PARK_RESULT_FAIL;
-	char extout[AST_MAX_EXTENSION] = "";
+	RAII(struct ast_channel *, parker_chan, ast_channel_ref(hostChannel->owner), ast_channel_cleanup);
 	RAII(struct ast_bridge_channel *, bridge_channel, NULL, ao2_cleanup);
 	
 	if (!ast_parking_provider_registered()) {
 		return res;
 	}
 
-	AUTO_RELEASE(sccp_device_t, device , sccp_channel_getDevice(hostChannel));
-	if (device && (ast_channel_state(hostChannel->owner) ==  AST_STATE_UP)) {
-		ast_channel_lock(hostChannel->owner);								/* we have to lock our channel, otherwise asterisk crashes internally */
-		bridge_channel = ast_channel_get_bridge_channel(hostChannel->owner);
-		ast_channel_unlock(hostChannel->owner);
-		if (bridge_channel) {
-			if (!ast_parking_park_call(bridge_channel, extout, sizeof(extout))) {			/* new asterisk-12/13 implementation returns the parkext not the parking_space */
-														/* See: https://issues.asterisk.org/jira/browse/ASTERISK-26029 */
-				char extstr[20];
-				memset(extstr, 0, sizeof(extstr));
-				//snprintf(extstr, sizeof(extstr), "%c%c %.16s", 128, SKINNY_LBL_CALL_PARK_AT, extout);
-				//sccp_dev_displayprinotify(device, extstr, 1, 10);				/* suppressing output of wrong parking information */
-				sccp_dev_displayprinotify(device, SKINNY_DISP_CALL_PARK, SCCP_MESSAGE_PRIORITY_TIMEOUT, 10);
-				sccp_log((DEBUGCAT_CHANNEL | DEBUGCAT_CORE)) (VERBOSE_PREFIX_3 "%s: Parked channel %s on %s\n", DEV_ID_LOG(device), ast_channel_name(hostChannel->owner), extout);
+	do {
+		AUTO_RELEASE(sccp_device_t, device, sccp_channel_getDevice(hostChannel));
+		pbx_log(LOG_NOTICE, "%s: Handling Park\n", hostChannel->designator);
+		if(device && (ast_channel_state(parker_chan) == AST_STATE_UP)) {
+			ast_channel_lock(parker_chan); /* we have to lock our channel, otherwise asterisk crashes internally */
+			bridge_channel = ast_channel_get_bridge_channel(parker_chan);
+			ast_channel_unlock(parker_chan);
+			if(!bridge_channel) {
+				pbx_log(LOG_ERROR, "Park action failed\n");
+				break;
+			}
+			if(!hostChannel->parking_sub) {
+				// pbx_log(LOG_NOTICE, "%s: Subscribing to park topic\n", hostChannel->designator);
+				channelPtr c = (channelPtr)hostChannel;                                        // casting away const
+				c->parking_sub = stasis_subscribe(ast_parking_topic(), parking_event_cb, (void *)c);
+				stasis_subscription_accept_message_type(c->parking_sub, ast_parked_call_type());
+				stasis_subscription_set_filter(c->parking_sub, STASIS_SUBSCRIPTION_FILTER_SELECTIVE);
+				// pbx_log(LOG_NOTICE, "%s: Added cleaning job\n", hostChannel->designator);
+				sccp_channel_addCleanupJob(c, &parking_subscriptionCleanup, (void *)sccp_channel_retain(c));
+			}
+			if(bridge_channel) {
+				RAII_VAR(struct ast_channel *, other_chan, NULL, ast_channel_cleanup);
+				ast_bridge_channel_lock_bridge(bridge_channel);
+				uint8_t peer_count = bridge_channel->bridge->num_channels;
+				if(peer_count == 2) {
+					struct ast_bridge_channel * other = ast_bridge_channel_peer(bridge_channel);
+					other_chan = other->chan;
+					ast_channel_ref(other_chan);
+				}
+				ast_bridge_unlock(bridge_channel->bridge);
+
+				pbx_log(LOG_NOTICE, "%s: Parking %s\n", hostChannel->designator, ast_channel_name(other_chan));
+				char app_data[256];
+				snprintf(app_data, 256, "%s,%s", ast_channel_parkinglot(bridge_channel->chan), "Rs");
+				if(ast_bridge_channel_write_park(bridge_channel, ast_channel_uniqueid(other_chan), ast_channel_uniqueid(bridge_channel->chan), app_data) != 0) {
+					pbx_log(LOG_ERROR, "Parking bridge_channel failed\n");
+					break;
+				}
+				pbx_channel_set_hangupcause(parker_chan, AST_CAUSE_NORMAL_CLEARING);
 				res = PARK_RESULT_SUCCESS;
 			}
 		}
-	}
+	} while(0);
+	sccp_channel_schedule_hangup(hostChannel, SCCP_HANGUP_TIMEOUT);
 	return res;
 }
 
