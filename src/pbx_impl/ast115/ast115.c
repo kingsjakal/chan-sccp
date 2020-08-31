@@ -1592,7 +1592,7 @@ static void parking_event_cb(void * data, struct stasis_subscription * sub, stru
 
 	switch(parked_payload->event_type) {
 		case PARKED_CALL: {
-			pbx_log(LOG_NOTICE, "%s Parked call:%s to parkingspace:%d@%s\n", ast_channel_name(parker_chan), parked_payload->parkee->base->uniqueid, parked_payload->parkingspace, parked_payload->parkinglot);
+			pbx_log(LOG_NOTICE, "%s Parked call to parkingspace:%d@%s\n", ast_channel_name(parker_chan), parked_payload->parkingspace, parked_payload->parkinglot);
 			char parkingspace[16];
 			snprintf(parkingspace, sizeof(parkingspace), "%d", parked_payload->parkingspace);
 			AUTO_RELEASE(sccp_device_t, d, sccp_channel_getDevice(parker));
