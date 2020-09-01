@@ -1587,15 +1587,28 @@ static sccp_parkresult_t sccp_astwrap_park(constChannelPtr hostChannel)
 					break;
 				}
 				sccp_log(DEBUGCAT_CHANNEL)(VERBOSE_PREFIX_3 "%s: Parking %s\n", hostChannel->designator, ast_channel_name(other_chan));
+				const char * parkinglot = ast_channel_parkinglot(bridge_channel->chan);
 				char app_data[256];
-				snprintf(app_data, 256, "%s,%s", ast_channel_parkinglot(bridge_channel->chan), "s");
+				snprintf(app_data, 256, "%s,%s", parkinglot, "s");
 				if(ast_bridge_channel_write_park(bridge_channel, ast_channel_uniqueid(other_chan), ast_channel_uniqueid(bridge_channel->chan), app_data) != 0) {
 					pbx_log(LOG_ERROR, "%s: Parking bridge_channel failed\n", hostChannel->designator);
 					break;
 				}
-				pbx_channel_set_hangupcause(parker_chan, AST_CAUSE_NORMAL_CLEARING);
-				res = PARK_RESULT_SUCCESS;
+
+				char cid_name[StationMaxNameSize];
+				snprintf(cid_name, StationMaxNameSize, "park:%s", sccp_strlen_zero(parkinglot) ? "default" : parkinglot);
+				__sccp_astwrap_updateConnectedLine(other_chan, "", cid_name, AST_CONNECTED_LINE_UPDATE_SOURCE_TRANSFER);
+				AUTO_RELEASE(sccp_channel_t, remote, get_sccp_channel_from_pbx_channel(other_chan));
+				if(remote) {
+					sccp_channel_set_calledparty(remote, cid_name, "");
+					remote->state = SCCP_CHANNELSTATE_HOLD;
+					sccp_indicate(NULL, remote, SCCP_CHANNELSTATE_CONNECTED);
+				}
+
+				pbx_channel_set_hangupcause(parker_chan, AST_CAUSE_REDIRECTED_TO_NEW_DESTINATION);
 				sccp_channel_schedule_hangup(hostChannel, SCCP_HANGUP_TIMEOUT);
+
+				res = PARK_RESULT_SUCCESS;
 			}
 		}
 	} while(0);
