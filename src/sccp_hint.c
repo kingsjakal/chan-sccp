@@ -928,6 +928,10 @@ static void sccp_hint_updateLineStateForSingleChannel(struct sccp_hint_lineState
 				sccp_copy_string(lineState->callInfo.partyName, "DND", sizeof(lineState->callInfo.partyName));
 				sccp_copy_string(lineState->callInfo.partyNumber, "DND", sizeof(lineState->callInfo.partyNumber));
 				break;
+			case SCCP_CHANNELSTATE_CALLPARK:
+				sccp_copy_string(lineState->callInfo.partyName, SKINNY_DISP_PARK, sizeof(lineState->callInfo.partyName));
+				sccp_copy_string(lineState->callInfo.partyNumber, "", sizeof(lineState->callInfo.partyNumber));
+				break;
 			case SCCP_CHANNELSTATE_OFFHOOK:
 			case SCCP_CHANNELSTATE_GETDIGITS:
 			case SCCP_CHANNELSTATE_RINGOUT:
@@ -942,7 +946,6 @@ static void sccp_hint_updateLineStateForSingleChannel(struct sccp_hint_lineState
 			case SCCP_CHANNELSTATE_HOLD:
 			case SCCP_CHANNELSTATE_CONGESTION:
 			case SCCP_CHANNELSTATE_CALLWAITING:
-			case SCCP_CHANNELSTATE_CALLPARK:
 			case SCCP_CHANNELSTATE_CALLREMOTEMULTILINE:
 			case SCCP_CHANNELSTATE_INVALIDNUMBER:
 			case SCCP_CHANNELSTATE_CALLCONFERENCE:

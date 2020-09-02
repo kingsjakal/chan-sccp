@@ -945,6 +945,9 @@ void sccp_astwrap_connectedline(sccp_channel_t * channel, const void *data, size
 #endif
         }
 #endif
+	if(SCCP_CHANNELSTATE_CALLPARK == channel->state) {
+		sccp_indicate_force(NULL, channel, SCCP_CHANNELSTATE_CONNECTED);
+	}
 }
 
 void sccp_astwrap_sendRedirectedUpdate(const sccp_channel_t * channel, const char *fromNumber, const char *fromName, const char *toNumber, const char *toName, uint8_t reason)

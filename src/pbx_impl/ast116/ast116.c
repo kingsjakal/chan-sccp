@@ -1595,14 +1595,9 @@ static sccp_parkresult_t sccp_astwrap_park(constChannelPtr hostChannel)
 					break;
 				}
 
-				char cid_name[StationMaxNameSize];
-				snprintf(cid_name, StationMaxNameSize, "park:%s", sccp_strlen_zero(parkinglot) ? "default" : parkinglot);
-				__sccp_astwrap_updateConnectedLine(other_chan, "", cid_name, AST_CONNECTED_LINE_UPDATE_SOURCE_TRANSFER);
 				AUTO_RELEASE(sccp_channel_t, remote, get_sccp_channel_from_pbx_channel(other_chan));
 				if(remote) {
-					sccp_channel_set_calledparty(remote, cid_name, "");
-					remote->state = SCCP_CHANNELSTATE_HOLD;
-					sccp_indicate(NULL, remote, SCCP_CHANNELSTATE_CONNECTED);
+					sccp_indicate(NULL, remote, SCCP_CHANNELSTATE_CALLPARK);
 				}
 
 				pbx_channel_set_hangupcause(parker_chan, AST_CAUSE_REDIRECTED_TO_NEW_DESTINATION);

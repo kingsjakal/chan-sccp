@@ -44,7 +44,7 @@ static void __sccp_indicate_remote_device(constDevicePtr device, channelPtr c, l
  * 
  */
 //void __sccp_indicate(sccp_device_t * _device, sccp_channel_t * c, uint8_t state, uint8_t debug, char *file, int line, const char *pretty_function)
-void __sccp_indicate(constDevicePtr maybe_device, channelPtr c, const sccp_channelstate_t state, const uint8_t debug, const char * file, const int line, const char * pretty_function)
+void __sccp_indicate(constDevicePtr maybe_device, channelPtr c, const sccp_channelstate_t state, boolean_t force, const uint8_t debug, const char * file, const int line, const char * pretty_function)
 {
 	if (debug) {
 		sccp_log((DEBUGCAT_INDICATE)) (VERBOSE_PREFIX_1 "SCCP: [INDICATE] state '%d' in file '%s', on line %d (%s)\n", state, file, line, pretty_function);
@@ -409,11 +409,11 @@ void __sccp_indicate(constDevicePtr maybe_device, channelPtr c, const sccp_chann
 	}
 
 	/* if channel state has changed, notify the others */
-	if (d && c->state != c->previousChannelState) {
+	if(d && (c->state != c->previousChannelState || force)) {
 		/* if it is a shared line and a state of interest */
 		if((SCCP_RWLIST_GETSIZE(&l->devices) > 1) && !c->conference
 		   && (c->state == SCCP_CHANNELSTATE_OFFHOOK || c->state == SCCP_CHANNELSTATE_DOWN || c->state == SCCP_CHANNELSTATE_ONHOOK || c->state == SCCP_CHANNELSTATE_CONNECTED
-		       || c->state == SCCP_CHANNELSTATE_CONNECTEDCONFERENCE || c->state == SCCP_CHANNELSTATE_HOLD)) {
+		       || c->state == SCCP_CHANNELSTATE_CONNECTEDCONFERENCE || c->state == SCCP_CHANNELSTATE_HOLD || c->state == SCCP_CHANNELSTATE_CALLPARK)) {
 			/* notify all remote devices */
 			__sccp_indicate_remote_device(d, c, l, state);
 		}
@@ -542,6 +542,11 @@ static void __sccp_indicate_remote_device(constDevicePtr device, channelPtr c, l
 					}
 					break;
 
+				case SCCP_CHANNELSTATE_CALLPARK:
+					if(c->channelStateReason == SCCP_CHANNELSTATEREASON_NORMAL) {
+						remoteDevice->indicate->remoteHold(remoteDevice, lineInstance, callid, SKINNY_CALLPRIORITY_NORMAL, stateVisibility);
+						iCallInfo.Send(ci, callid, calltype, lineInstance, remoteDevice, TRUE);
+					}
 				default:
 					break;
 
